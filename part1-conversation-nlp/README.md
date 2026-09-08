@@ -80,43 +80,6 @@ npm run dev
 ```
 - Dev Server: `http://localhost:5173`
 
----
-
-## Demo Flow & Verification
-
-### Step-by-Step Hackathon Script:
-
-1. Open `http://localhost:5173`.
-2. Click **"Load Demo Script"** (or send messages manually):
-   - **Riya**: `"You still owe me ₹250 for the tea yesterday"`
-   - **Arjun**: `"Yes, I'll pay you back ₹250 for the tea"`
-3. **Inline Card Appears**:
-   - Card displays: `"Detected: You owe Riya ₹250 for tea — Confirm?"`
-4. **First Confirmation**:
-   - Click **"Confirm as Arjun"** $\rightarrow$ Status updates: `Arjun: Confirmed ✓`, `Riya: Pending`.
-5. **Second Confirmation**:
-   - Switch active user to **Riya** (or click **"Dual View"**) and click **"Confirm as Riya"**.
-6. **Mutual Consent Established**:
-   - Card turns green showing `"Both parties confirmed ✅"` along with Passport ID `TP-2026-XXXXXXX`.
-7. **Handoff Inspection**:
-   - The **Handoff Inspector** panel updates showing the POST request payload sent to Part 2.
-
-### Additional Phrasing Examples Supported:
-- `"You owe me 400rs"`
-- `"You owe me ₹400"`
-- `"You still owe me 400"`
-- `"Send me 400"`
-- `"Pay me 400 rupees"`
-- `"You have to pay me ₹400"`
-- `"I'll pay you 400"`
-- `"I'll send you 400rs"`
-- `"I will pay you back ₹400"`
-- `"Can you send me 400 rupees?"`
-
-### False Positive Prevention (Excluded Messages):
-- `"I have 400rs in my wallet"` $\rightarrow$ `has_financial_intent = False`
-- `"The movie cost 400rs"` $\rightarrow$ `has_financial_intent = False`
-- `"The bill was 400rs"` $\rightarrow$ `has_financial_intent = False` (unless prior context established debt).
 
 ---
 
