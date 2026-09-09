@@ -1,6 +1,6 @@
 # VaultVanguard — TrustBridge Autonomous Financial Layer
 
-Welcome to **VaultVanguard**, the monorepo repository for **TrustBridge** — an autonomous fintech infrastructure that turns natural conversation into verified, immutable, reconciled financial transactions.
+> **TrustBridge** turns natural conversation into verified, immutable, reconciled financial transactions — autonomously, without manual payment forms.
 
 ---
 
@@ -10,29 +10,136 @@ TrustBridge is divided into four decoupled, modular services:
 
 ```
 VaultVanguard/
-├── part1-conversation-nlp/          # [ACTIVE] Conversation, NLP & Mutual Consent Layer
-├── part2-transaction-passport/      # [PLACEHOLDER] Transaction Passport & State Machine
-├── part3-payment-reconciliation/    # [PLACEHOLDER] Payment Execution & Settlement Engine
-└── part4-dashboard-dispute/         # [PLACEHOLDER] Merchant Dashboard & Dispute Resolution
+├── part1-conversation-nlp/       [ACTIVE ✅]  Conversation, NLP & Mutual Consent Layer
+├── part2-transaction-passport/   [PLACEHOLDER ⏳]  Transaction Passport & State Machine
+├── part3-payment-reconciliation/ [ACTIVE ✅]  Payment Execution & Settlement Engine
+└── part4-dashboard-dispute/      [ACTIVE ✅]  Merchant Dashboard & Dispute Resolution
 ```
 
-### Module Responsibilities
+### Data Flow
 
-1. **Part 1 — Conversation, NLP & Mutual Consent Layer (`part1-conversation-nlp/`)**:
-   - **Owner**: Part 1 Team Contribution.
-   - **Function**: Continuously analyzes chat streams between users (e.g. Arjun and Riya), detects financial obligations using OpenAI LLM + standalone Rule-Based Fallback, manages 2-Party Mutual Consent, and emits structured handoff payloads to Part 2.
-2. **Part 2 — Transaction Passport & State Machine (`part2-transaction-passport/`)**:
-   - **Function**: Receives handoff payload from Part 1, validates immutable conversation evidence, generates the official Transaction Passport (`TP-2026-XXXXXXX`), and manages life-cycle state transitions.
-3. **Part 3 — Payment Execution & Reconciliation (`part3-payment-reconciliation/`)**:
-   - **Function**: Handles payment gateway/UPI execution, webhooks, and ledger reconciliation against issued Transaction Passports.
-4. **Part 4 — Merchant Dashboard & Disputes (`part4-dashboard-dispute/`)**:
-   - **Function**: Renders analytics, merchant settlement views, and dispute resolution workflows backed by conversation evidence.
+```
+User Chat (Arjun ↔ Riya)
+    │
+    ▼
+[Part 1 — NLP Engine] ──── detects "You owe me ₹250 for tea"
+    │                       2-Party Mutual Consent (both click Confirm)
+    │  POST /api/passport/create
+    ▼
+[Part 2 — Passport Service] ──── mints TP-2026-XXXXXXX  ← PLACEHOLDER
+    │
+    │  Passport handed off (CONFIRMED)
+    ▼
+[Part 3 — Payment & Reconciliation]
+    │  Pay Now → Mock UPI Gateway → MISMATCH_DETECTED → Reconcile → SETTLED
+    │
+    │  Data consumed live via HTTP
+    ▼
+[Part 4 — Merchant Dashboard & Disputes]
+    │  Analytics · Transaction monitoring · Dispute filing + resolution
+```
 
 ---
 
-## Part 1 Integration Handoff Contract
+## Module Status & Responsibilities
 
-When mutual consent is reached by both participants in Part 1 (`payer_confirmed: true` AND `receiver_confirmed: true`), Part 1 dispatches a POST request to Part 2's endpoint `/api/passport/create`:
+### Part 1 — Conversation, NLP & Mutual Consent `[ACTIVE ✅]`
+- **Port**: Backend `8000`, Frontend `5173`
+- **Stack**: Python 3.13 + FastAPI | React 18 + Vite 5 + Tailwind CSS
+- **Function**: Reads natural chat streams, extracts financial intent via dual-engine NLP (OpenAI `gpt-4o-mini` + regex fallback), enforces 2-Party Mutual Consent, and emits a structured handoff payload to Part 2.
+- **Consent States**: `PENDING → SINGLE_CONFIRMED → MUTUAL_CONSENT_REACHED` / `DISMISSED`
+- **Docs**: [`part1-conversation-nlp/README.md`](part1-conversation-nlp/README.md)
+
+### Part 2 — Transaction Passport & State Machine `[PLACEHOLDER ⏳]`
+- **Function**: Will receive Part 1's handoff, validate immutable evidence, mint official `TP-2026-XXXXXXX` passports, and manage the lifecycle state machine.
+- **Lifecycle**: `CREATED → MUTUAL_CONSENT → IN_SETTLEMENT → SETTLED / DISPUTED`
+- **Contract**: [`part1-conversation-nlp/docs/HANDOFF_CONTRACT.md`](part1-conversation-nlp/docs/HANDOFF_CONTRACT.md)
+
+### Part 3 — Payment Execution & Reconciliation `[ACTIVE ✅]`
+- **Port**: Backend `8001`, Frontend `5173`
+- **Stack**: Python + FastAPI | React 18 + Vite 5
+- **Function**: Imports CONFIRMED passports, initiates Mock UPI payments, processes gateway callbacks, detects gateway/merchant mismatches, runs 6-point reconciliation engine, and creates idempotent settlement records.
+- **Lifecycle**: `CONFIRMED → PAYMENT_INITIATED → PAYMENT_PENDING → PAYMENT_PROCESSED → MISMATCH_DETECTED → RECONCILING → VERIFIED → SETTLED`
+- **Docs**: [`part3-payment-reconciliation/README.md`](part3-payment-reconciliation/README.md)
+
+### Part 4 — Merchant Dashboard & Dispute Resolution `[ACTIVE ✅]`
+- **Port**: Backend `8002`, Frontend `5174`
+- **Stack**: Python + FastAPI + httpx | React 18 + Vite 5
+- **Function**: Aggregates live data from Part 3, provides full merchant analytics dashboard, transaction monitoring, and a complete dispute lifecycle (OPEN → INVESTIGATING → RESOLVED/CLOSED) backed by immutable Part 1 conversation evidence.
+- **Features**: 5-tab dashboard (Overview, Transactions, Disputes, Analytics, Audit Trail)
+- **Docs**: [`part4-dashboard-dispute/README.md`](part4-dashboard-dispute/README.md)
+
+---
+
+## Quickstart — Running the Full Stack
+
+> Start each service in a separate terminal.
+
+### Part 1 — NLP & Consent (Port 8000 / 5173)
+```bash
+# Backend
+cd part1-conversation-nlp/backend
+pip install -r requirements.txt
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+# Frontend
+cd part1-conversation-nlp/frontend
+npm install && npm run dev
+```
+
+### Part 2 — Transaction Passport (Port TBD)
+```bash
+# Not yet implemented — placeholder directory only
+```
+
+### Part 3 — Payment & Reconciliation (Port 8001 / 5173)
+```bash
+# Backend
+cd part3-payment-reconciliation/backend
+pip install -r requirements.txt
+python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+
+# Frontend
+cd part3-payment-reconciliation/frontend
+npm install && npm run dev
+```
+
+### Part 4 — Merchant Dashboard & Disputes (Port 8002 / 5174)
+```bash
+# Backend
+cd part4-dashboard-dispute/backend
+pip install -r requirements.txt
+python -m uvicorn main:app --host 0.0.0.0 --port 8002 --reload
+
+# Frontend
+cd part4-dashboard-dispute/frontend
+npm install && npm run dev
+# → http://localhost:5174
+```
+
+---
+
+## Environment Configuration
+
+Copy `.env.example` to `.env` in the root directory:
+
+```env
+OPENAI_API_KEY=          # Optional — Part 1 falls back to rule-based NLP if absent
+CONFIDENCE_THRESHOLD=0.75
+DEFAULT_CURRENCY=INR
+HOST=0.0.0.0
+PORT=8000
+P3_PORT=8001
+P4_PORT=8002
+PART3_BASE_URL=http://localhost:8001
+PART1_BASE_URL=http://localhost:8000
+```
+
+---
+
+## Part 1 → Part 2 Handoff Contract
+
+When both parties confirm (`payer_confirmed: true` AND `receiver_confirmed: true`), Part 1 POSTs to Part 2's `/api/passport/create`:
 
 ```json
 {
@@ -47,32 +154,26 @@ When mutual consent is reached by both participants in Part 1 (`payer_confirmed:
   "confidence": 0.91,
   "payer_confirmed": true,
   "receiver_confirmed": true,
-  "created_at": "2026-09-08T22:30:00Z"
+  "created_at": "2026-09-08T22:30:00Z",
+  "conversation_evidence": [...],
+  "confirmations": {
+    "payer_confirmed_at": "...",
+    "receiver_confirmed_at": "..."
+  }
 }
 ```
 
-Detailed specification is located at [`part1-conversation-nlp/docs/HANDOFF_CONTRACT.md`](file:///c:/Users/Monika%20Yadav/OneDrive/Desktop/Hyperion/VaultVanguard/part1-conversation-nlp/docs/HANDOFF_CONTRACT.md).
+Full contract spec: [`part1-conversation-nlp/docs/HANDOFF_CONTRACT.md`](part1-conversation-nlp/docs/HANDOFF_CONTRACT.md)
 
 ---
 
-## Quickstart — Running Part 1 Standalone
+## Tech Stack Summary
 
-### Backend Startup (Python + FastAPI)
-```bash
-cd part1-conversation-nlp/backend
-python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### Frontend Startup (React + Vite)
-```bash
-cd part1-conversation-nlp/frontend
-npm run dev
-```
-
-### Run Test Suite
-```bash
-cd part1-conversation-nlp/backend
-python -m pytest
-```
-
-For comprehensive Part 1 documentation, setup guides, API endpoints, and security considerations, see [`part1-conversation-nlp/README.md`](file:///c:/Users/Monika%20Yadav/OneDrive/Desktop/Hyperion/VaultVanguard/part1-conversation-nlp/README.md).
+| Layer | Technology |
+|-------|-----------|
+| NLP & Consent | Python 3.13, FastAPI, OpenAI `gpt-4o-mini`, Regex fallback |
+| Payment Engine | Python, FastAPI, Mock UPI Gateway, 6-point Reconciliation |
+| Dashboard | Python, FastAPI, `httpx` (upstream calls to Part 3) |
+| All Frontends | React 18, Vite 5, Lucide Icons, Vanilla CSS (dark glassmorphism) |
+| Storage | In-memory (hackathon) → PostgreSQL/Supabase (production target) |
+| Testing | Pytest (Part 1 backend — `test_api.py`, `test_nlp.py`) |
