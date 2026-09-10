@@ -1,57 +1,53 @@
 """
 Part 4 — Merchant Dashboard & Dispute Resolution API (FastAPI)
-Port: 8002
+Port: 8003
 
 Endpoints:
   GET  /api/health
-  GET  /api/dashboard/summary        — Aggregated merchant analytics (from Part 3)
-  GET  /api/dashboard/passports      — All passports + payment status (from Part 3)
-  GET  /api/dashboard/settlements    — All settlements (from Part 3)
-  GET  /api/dashboard/audit          — Full system-wide audit log (from Part 3)
-  POST /api/dispute/file             — File a new dispute
-  GET  /api/dispute/all              — All disputes
-  GET  /api/dispute/{dispute_id}     — Single dispute with evidence
-  POST /api/dispute/update           — Update dispute status / resolution
-  GET  /api/dispute/passport/{passport_id} — All disputes for a passport
-  POST /api/demo/seed-dispute        — Seed a demo dispute
-  POST /api/demo/reset               — Reset Part 4 store
+  GET  /api/merchant/dashboard
+  POST /api/merchant/sync
+  POST /api/dispute/file
+  POST /api/dispute/{dispute_id}/review
+  POST /api/dispute/{dispute_id}/resolve
+  GET  /api/dispute/{passport_id}/evidence
+  GET  /api/disputes
+  POST /api/demo/seed
+  POST /api/demo/reset
 """
-import uuid
 import logging
-import httpx
-from datetime import datetime, date
-from collections import defaultdict
-from typing import Optional, List
+from datetime import datetime
+from typing import Optional, List, Dict, Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import httpx
 
-from config import HOST, PORT, PART3_BASE_URL
+from config import HOST, PORT, P1_URL, P2_URL, P3_URL
 from models import (
-    FileDisputeRequest,
-    UpdateDisputeRequest,
-    SeedDisputeRequest,
+    MerchantTransaction,
+    MerchantSyncStatus,
     DisputeRecord,
     DisputeStatus,
-    DisputeResolution,
-    DisputeReason,
-    EvidenceMessage,
-    MerchantSummary,
+    FileDisputeRequest,
+    ResolveDisputeRequest,
+    SyncMerchantRequest,
+    DisputeEvidencePackage,
 )
 from store import store
+from evidence_service import build_evidence_package
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("TrustBridge-P4-API")
+logger = logging.getLogger("TrustBridge-P4-Dispute")
 
 app = FastAPI(
     title="TrustBridge — Part 4: Merchant Dashboard & Dispute Resolution",
     description=(
-        "Aggregated merchant analytics, transaction monitoring, and dispute resolution "
-        "backed by immutable Part 1 conversation evidence. Consumes data from Part 3 "
-        "(Payment & Reconciliation) at port 8001."
+        "Lender/Merchant-side dashboard (Riya), demonstration of the intentional "
+        "PENDING vs SUCCESS contradiction, live state synchronization upon reconciliation, "
+        "and structured evidence resolution for later 'he said / she said' disputes."
     ),
     version="4.0.0",
 )
@@ -65,315 +61,254 @@ app.add_middleware(
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers — fetch data from Part 3
-# ---------------------------------------------------------------------------
-
-async def fetch_p3(path: str) -> dict:
-    """Fetch JSON from Part 3 backend."""
-    url = f"{PART3_BASE_URL}{path}"
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            return resp.json()
-    except httpx.RequestError as e:
-        logger.warning(f"Part 3 unreachable at {url}: {e}")
-        return {}
-    except httpx.HTTPStatusError as e:
-        logger.warning(f"Part 3 returned error for {url}: {e}")
-        return {}
-
-
-def _compute_summary(passports_data: dict, settlements_data: dict, disputes: list) -> MerchantSummary:
-    """Derive aggregated merchant summary from raw Part 3 data."""
-    passports = passports_data.get("passports", [])
-    settlements = settlements_data.get("settlements", [])
-
-    total_passports = len(passports)
-    total_volume = sum(p["passport"]["amount"] for p in passports if p.get("passport"))
-    settled_volume = sum(s["amount"] for s in settlements)
-
-    state_counts: dict = defaultdict(int)
-    payer_counts: dict = defaultdict(float)
-    receiver_counts: dict = defaultdict(float)
-    purpose_counts: dict = defaultdict(int)
-    daily_vol: dict = defaultdict(float)
-
-    for p in passports:
-        pp = p.get("passport", {})
-        state = pp.get("state", "UNKNOWN")
-        state_counts[state] += 1
-        payer_counts[pp.get("payer", "?")] += pp.get("amount", 0)
-        receiver_counts[pp.get("receiver", "?")] += pp.get("amount", 0)
-        purpose_counts[pp.get("purpose", "other")] += 1
-
-        # Daily volume from updated_at
-        ts = pp.get("updated_at", pp.get("imported_at", ""))
-        try:
-            day = ts[:10]
-            daily_vol[day] += pp.get("amount", 0)
-        except Exception:
-            pass
-
-    total_settled = state_counts.get("SETTLED", 0)
-    total_pending = state_counts.get("CONFIRMED", 0) + state_counts.get("PAYMENT_INITIATED", 0) + state_counts.get("PAYMENT_PENDING", 0)
-
-    # Dispute counts from local store
-    open_disputes = sum(1 for d in disputes if d.status == DisputeStatus.OPEN or d.status == DisputeStatus.INVESTIGATING)
-    resolved_disputes = sum(1 for d in disputes if d.status in (DisputeStatus.RESOLVED, DisputeStatus.CLOSED))
-    total_disputed = len(disputes)
-
-    top_payers = sorted(
-        [{"name": k, "volume": round(v, 2)} for k, v in payer_counts.items()],
-        key=lambda x: x["volume"], reverse=True
-    )[:5]
-    top_receivers = sorted(
-        [{"name": k, "volume": round(v, 2)} for k, v in receiver_counts.items()],
-        key=lambda x: x["volume"], reverse=True
-    )[:5]
-
-    daily_volume = sorted(
-        [{"date": k, "volume": round(v, 2)} for k, v in daily_vol.items()],
-        key=lambda x: x["date"]
-    )[-14:]  # Last 14 days
-
-    return MerchantSummary(
-        total_passports=total_passports,
-        total_settled=total_settled,
-        total_pending=total_pending,
-        total_disputed=total_disputed,
-        total_volume_inr=round(total_volume, 2),
-        settled_volume_inr=round(settled_volume, 2),
-        open_disputes=open_disputes,
-        resolved_disputes=resolved_disputes,
-        top_payers=top_payers,
-        top_receivers=top_receivers,
-        purpose_breakdown=dict(purpose_counts),
-        daily_volume=daily_volume,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Health
-# ---------------------------------------------------------------------------
-
 @app.get("/api/health")
-async def health_check():
-    p3_health = await fetch_p3("/api/health")
+def health_check():
     return {
         "status": "online",
         "layer": "Part 4 — Merchant Dashboard & Dispute Resolution",
         "port": PORT,
-        "disputes": len(store.disputes),
-        "open_disputes": store.open_dispute_count(),
-        "part3_status": p3_health.get("status", "unreachable"),
-        "part3_passports": p3_health.get("passports", 0),
-        "part3_settlements": p3_health.get("settlements", 0),
+        "transactions_count": len(store.transactions),
+        "disputes_count": len(store.disputes),
+        "peers": {
+            "p1": P1_URL,
+            "p2": P2_URL,
+            "p3": P3_URL,
+        },
+    }
+
+
+@app.get("/api/merchant/dashboard")
+def get_merchant_dashboard():
+    """Returns Riya's (the lender/merchant) dashboard view."""
+    txs = store.list_transactions()
+    pending_count = sum(1 for t in txs if t.status == MerchantSyncStatus.PENDING)
+    settled_count = sum(1 for t in txs if t.status == MerchantSyncStatus.SETTLED)
+    pending_amount = sum(t.amount for t in txs if t.status == MerchantSyncStatus.PENDING)
+    settled_amount = sum(t.amount for t in txs if t.status == MerchantSyncStatus.SETTLED)
+
+    return {
+        "merchant_name": "Riya (Lender / Creditor)",
+        "summary": {
+            "total_transactions": len(txs),
+            "pending_count": pending_count,
+            "settled_count": settled_count,
+            "pending_amount": pending_amount,
+            "settled_amount": settled_amount,
+            "has_stale_contradiction": any(t.is_stale_demo_mismatch for t in txs),
+        },
+        "transactions": txs,
+    }
+
+
+@app.post("/api/merchant/sync")
+def sync_merchant(req: SyncMerchantRequest):
+    """
+    Called by Part 3 Reconciliation Engine or payment gateway to update
+    merchant-side status from PENDING -> SETTLED in real time!
+    """
+    updated = store.update_merchant_status(
+        passport_id=req.passport_id,
+        status=req.status,
+        payment_ref=req.payment_reference,
+    )
+    logger.info(
+        f"Synced merchant record for {req.passport_id} -> {req.status.value} "
+        f"(Reason: {req.update_reason or 'Reconciliation update'})"
+    )
+    return {
+        "status": "synchronized",
+        "transaction": updated,
+        "message": f"Merchant status updated to {req.status.value}",
+    }
+
+
+@app.post("/api/dispute/file")
+def file_dispute(req: FileDisputeRequest):
+    """
+    File a dispute when a participant claims non-receipt ('he said / she said').
+    Fetches immutable passport evidence and generates the human-readable evidence timeline.
+    """
+    # Attempt to fetch authoritative evidence from Part 2 if available
+    passport_data = None
+    try:
+        with httpx.Client(timeout=0.5) as client:
+            res = client.get(f"{P2_URL}/api/passport/{req.passport_id}")
+            if res.status_code == 200:
+                passport_data = res.json().get("passport")
+    except Exception as e:
+        logger.warning(f"Could not reach Part 2 for dispute evidence: {e}")
+
+    dispute = store.file_dispute(req, passport_data=passport_data)
+    logger.info(f"Dispute opened: {dispute.dispute_id} for passport {req.passport_id} by {req.initiator}")
+
+    return {
+        "dispute": dispute,
+        "message": "Dispute filed. Structured evidence timeline generated from immutable passport.",
+    }
+
+
+@app.post("/api/dispute/{dispute_id}/review")
+def review_dispute(dispute_id: str):
+    """Move dispute to UNDER_REVIEW."""
+    try:
+        updated = store.update_dispute_status(dispute_id, DisputeStatus.UNDER_REVIEW)
+        return {"dispute": updated}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Dispute not found")
+
+
+@app.post("/api/dispute/{dispute_id}/resolve")
+def resolve_dispute(dispute_id: str, req: ResolveDisputeRequest):
+    """
+    Resolve dispute using verifiable evidence.
+    Transitions: UNDER_REVIEW -> RESOLVED without overwriting original settlement evidence!
+    """
+    try:
+        updated = store.update_dispute_status(
+            dispute_id,
+            DisputeStatus.RESOLVED,
+            notes=req.resolution_notes,
+        )
+        return {
+            "dispute": updated,
+            "message": "Dispute RESOLVED. Original settlement evidence preserved and untampered.",
+        }
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Dispute not found")
+
+
+@app.get("/api/dispute/{passport_id}/evidence")
+def get_evidence(passport_id: str):
+    """Returns structured human-readable evidence package for a given passport."""
+    passport_data = None
+    try:
+        with httpx.Client(timeout=2.0) as client:
+            res = client.get(f"{P2_URL}/api/passport/{passport_id}")
+            if res.status_code == 200:
+                passport_data = res.json().get("passport")
+    except Exception:
+        pass
+
+    tx = store.get_transaction(passport_id)
+    pkg = build_evidence_package(
+        passport_id=passport_id,
+        passport_data=passport_data or (tx.model_dump() if tx else None),
+    )
+    return {"evidence_package": pkg}
+
+
+@app.get("/api/disputes")
+def list_disputes():
+    disputes = store.list_disputes()
+    return {
+        "count": len(disputes),
+        "disputes": disputes,
     }
 
 
 # ---------------------------------------------------------------------------
-# Dashboard — aggregated analytics
+# Upstream Part 3 Proxies & Compatibility Endpoints
 # ---------------------------------------------------------------------------
 
 @app.get("/api/dashboard/summary")
 async def dashboard_summary():
-    """Aggregated merchant analytics — combines Part 3 data + local disputes."""
-    passports_data = await fetch_p3("/api/passports")
-    settlements_data = await fetch_p3("/api/settlements")
-    all_disputes = store.get_all_disputes()
-    summary = _compute_summary(passports_data, settlements_data, all_disputes)
+    """Aggregated merchant summary combining local store + Part 3."""
+    passports = []
+    settlements = []
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            p_res = await client.get(f"{P3_URL}/api/passports")
+            if p_res.status_code == 200:
+                passports = p_res.json().get("passports", [])
+            s_res = await client.get(f"{P3_URL}/api/settlements")
+            if s_res.status_code == 200:
+                settlements = s_res.json().get("settlements", [])
+    except Exception as e:
+        logger.warning(f"Could not reach Part 3 for summary: {e}")
+
+    txs = store.list_transactions()
     return {
-        "summary": summary,
-        "dispute_by_status": store.dispute_count_by_status(),
+        "summary": {
+            "total_passports": len(passports) or len(txs),
+            "settled_count": sum(1 for t in txs if t.status == MerchantSyncStatus.SETTLED) or len(settlements),
+            "pending_count": sum(1 for t in txs if t.status == MerchantSyncStatus.PENDING),
+            "total_disputes": len(store.disputes),
+        },
+        "disputes_count": len(store.disputes),
+        "transactions_count": len(txs),
     }
 
 
 @app.get("/api/dashboard/passports")
 async def dashboard_passports():
-    """All passports with payment + merchant status, enriched with dispute info."""
-    data = await fetch_p3("/api/passports")
-    passports = data.get("passports", [])
-
-    # Enrich each passport entry with its disputes
-    enriched = []
-    for entry in passports:
-        pid = entry.get("passport", {}).get("passport_id")
-        disputes = store.get_disputes_for_passport(pid) if pid else []
-        enriched.append({
-            **entry,
-            "disputes": [d.model_dump() for d in disputes],
-            "has_dispute": len(disputes) > 0,
-            "open_dispute_count": sum(1 for d in disputes if d.status in (DisputeStatus.OPEN, DisputeStatus.INVESTIGATING)),
-        })
-
-    return {"count": len(enriched), "passports": enriched}
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            res = await client.get(f"{P3_URL}/api/passports")
+            if res.status_code == 200:
+                return res.json()
+    except Exception:
+        pass
+    return {"count": len(store.transactions), "passports": store.list_transactions()}
 
 
 @app.get("/api/dashboard/settlements")
 async def dashboard_settlements():
-    """All settled transactions from Part 3."""
-    return await fetch_p3("/api/settlements")
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            res = await client.get(f"{P3_URL}/api/settlements")
+            if res.status_code == 200:
+                return res.json()
+    except Exception:
+        pass
+    return {"count": 0, "settlements": []}
 
 
 @app.get("/api/dashboard/audit")
 async def dashboard_audit():
-    """Full system-wide audit trail from Part 3."""
-    return await fetch_p3("/api/audit/all/events")
-
-
-# ---------------------------------------------------------------------------
-# Dispute — file, list, inspect, resolve
-# ---------------------------------------------------------------------------
-
-@app.post("/api/dispute/file")
-async def file_dispute(req: FileDisputeRequest):
-    """
-    File a dispute against a settled (or any) transaction passport.
-    Automatically pulls conversation evidence from Part 3's passport record.
-    """
-    # Fetch the passport + evidence from Part 3
-    passport_data = await fetch_p3(f"/api/passport/{req.passport_id}")
-    passport = passport_data.get("passport")
-
-    if not passport and not passport_data:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Passport {req.passport_id} not found in Part 3. Ensure Part 3 is running."
-        )
-
-    # Extract conversation evidence from original_evidence stored in Part 3
-    original_evidence = (passport or {}).get("original_evidence", {})
-    raw_messages = original_evidence.get("messages", [])
-    evidence_messages = [
-        EvidenceMessage(
-            sender=m.get("sender", "Unknown"),
-            text=m.get("text", ""),
-            timestamp=m.get("timestamp", datetime.now().isoformat()),
-        )
-        for m in raw_messages
-    ]
-
-    # Reconciliation checks evidence
-    settlement = passport_data.get("settlement")
-    recon_checks = []
-    if settlement and settlement.get("reconciliation_result"):
-        recon_checks = settlement["reconciliation_result"].get("checks", [])
-
-    payment = passport_data.get("payment")
-    settlement_id = settlement.get("settlement_id") if settlement else None
-    payment_reference = payment.get("payment_reference") if payment else None
-
-    dispute_id = f"DISP-{uuid.uuid4().hex[:8].upper()}"
-    dispute = DisputeRecord(
-        dispute_id=dispute_id,
-        passport_id=req.passport_id,
-        settlement_id=settlement_id,
-        payment_reference=payment_reference,
-        filed_by=req.filed_by,
-        reason=req.reason,
-        description=req.description,
-        claimed_amount=req.claimed_amount,
-        status=DisputeStatus.OPEN,
-        conversation_evidence=evidence_messages,
-        reconciliation_checks=recon_checks,
-    )
-    store.add_dispute(dispute)
-
-    logger.info(f"Dispute filed: {dispute_id} for passport {req.passport_id} by {req.filed_by}")
-
-    return {
-        "dispute": dispute,
-        "passport": passport,
-        "message": f"Dispute {dispute_id} filed successfully — status: OPEN",
-    }
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            res = await client.get(f"{P3_URL}/api/audit/all/events")
+            if res.status_code == 200:
+                return res.json()
+    except Exception:
+        pass
+    return {"count": 0, "events": []}
 
 
 @app.get("/api/dispute/all")
-def get_all_disputes():
-    """List all disputes with summary."""
-    disputes = store.get_all_disputes()
-    return {
-        "count": len(disputes),
-        "open": store.open_dispute_count(),
-        "by_status": store.dispute_count_by_status(),
-        "disputes": [d.model_dump() for d in disputes],
-    }
+def get_all_disputes_compat():
+    return list_disputes()
 
 
-@app.get("/api/dispute/{dispute_id}")
-def get_dispute(dispute_id: str):
-    """Get a single dispute with full evidence."""
-    d = store.get_dispute(dispute_id)
-    if not d:
-        raise HTTPException(status_code=404, detail=f"Dispute not found: {dispute_id}")
-    return {"dispute": d.model_dump()}
-
-
-@app.post("/api/dispute/update")
-def update_dispute(req: UpdateDisputeRequest):
-    """Update a dispute's status and optionally set resolution."""
-    updated = store.update_dispute(
-        dispute_id=req.dispute_id,
-        status=req.status,
-        resolution=req.resolution,
-        resolution_notes=req.resolution_notes,
+@app.post("/api/demo/seed")
+def seed_demo():
+    """Seeds the classic ₹250 Tea scenario with intentional PENDING state."""
+    pid = "TP-2026-8F42X91"
+    tx = MerchantTransaction(
+        passport_id=pid,
+        payer="Arjun",
+        receiver="Riya",
+        amount=250.0,
+        purpose="tea",
+        status=MerchantSyncStatus.PENDING,
+        payment_reference="PAY-UPI-2026-8821",
+        is_stale_demo_mismatch=True,
     )
-    if not updated:
-        raise HTTPException(status_code=404, detail=f"Dispute not found: {req.dispute_id}")
+    store.add_transaction(tx)
     return {
-        "dispute": updated.model_dump(),
-        "message": f"Dispute {req.dispute_id} updated → {req.status.value}",
+        "status": "seeded",
+        "passport_id": pid,
+        "transaction": tx,
+        "message": f"Seeded {pid} in PENDING state (stale mismatch demo ready)",
     }
-
-
-@app.get("/api/dispute/passport/{passport_id}")
-def get_disputes_for_passport(passport_id: str):
-    """All disputes filed against a specific passport."""
-    disputes = store.get_disputes_for_passport(passport_id)
-    return {
-        "passport_id": passport_id,
-        "count": len(disputes),
-        "disputes": [d.model_dump() for d in disputes],
-    }
-
-
-# ---------------------------------------------------------------------------
-# Demo — seed & reset
-# ---------------------------------------------------------------------------
-
-@app.post("/api/demo/seed-dispute")
-async def seed_demo_dispute(req: SeedDisputeRequest = None):
-    """
-    Seed a demo dispute for the given passport_id.
-    Pulls live evidence from Part 3.
-    """
-    if req is None:
-        req = SeedDisputeRequest(passport_id="DEMO")
-
-    file_req = FileDisputeRequest(
-        passport_id=req.passport_id,
-        filed_by=req.filed_by,
-        reason=req.reason,
-        description=req.description,
-    )
-    return await file_dispute(file_req)
 
 
 @app.post("/api/demo/reset")
-def reset_demo():
-    """Reset Part 4 store (disputes only — Part 3 data is unaffected)."""
+def reset_store():
     store.reset()
-    return {
-        "status": "reset",
-        "message": "Part 4 dispute store cleared — Part 3 data is unaffected",
-    }
+    return {"status": "reset", "message": "Part 4 store reset"}
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import uvicorn

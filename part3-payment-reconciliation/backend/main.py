@@ -203,6 +203,40 @@ def initiate_payment(req: InitiatePaymentRequest):
     """
     passport = store.get_passport(req.passport_id)
     if not passport:
+        # Attempt auto-import from Part 2 if available
+        try:
+            import httpx
+            with httpx.Client(timeout=0.5) as client:
+                res = client.get(f"http://localhost:8002/api/passport/{req.passport_id}")
+                if res.status_code == 200:
+                    p_data = res.json().get("passport")
+                    if p_data:
+                        passport = PassportRecord(
+                            passport_id=p_data["passport_id"],
+                            conversation_id=p_data.get("conversation_id", "conv-12345"),
+                            payer=p_data["payer"],
+                            receiver=p_data["receiver"],
+                            amount=p_data["amount"],
+                            currency=p_data.get("currency", "INR"),
+                            purpose=p_data.get("purpose", "tea"),
+                            state=PassportState.CONFIRMED,
+                            original_evidence=p_data.get("original_evidence", {}),
+                        )
+                        store.add_passport(passport)
+                        merchant = MerchantRecord(
+                            passport_id=passport.passport_id,
+                            amount=passport.amount,
+                            currency=passport.currency,
+                            payer=passport.payer,
+                            receiver=passport.receiver,
+                            status=MerchantStatus.PENDING,
+                            last_update_reason="Auto-imported from Part 2 Transaction Passport",
+                        )
+                        store.add_merchant_record(merchant)
+        except Exception:
+            pass
+
+    if not passport:
         raise HTTPException(status_code=404, detail=f"Passport not found: {req.passport_id}")
 
     if passport.state != PassportState.CONFIRMED:
@@ -424,6 +458,32 @@ def gateway_callback(req: GatewayCallbackRequest):
         },
     )
 
+    # Push mismatch state to Part 2 and Part 4
+    try:
+        import httpx
+        with httpx.Client(timeout=0.5) as client:
+            client.post(
+                f"http://localhost:8002/api/passport/{req.passport_id}/transition",
+                json={
+                    "new_state": "MISMATCH_DETECTED",
+                    "event_type": "MISMATCH_DETECTED",
+                    "description": f"Gateway reported SUCCESS ₹{gw_response.amount} vs Merchant dashboard PENDING ₹{merchant.amount if merchant else '?'}",
+                    "payment_reference": req.payment_reference,
+                    "gateway_transaction_id": gw_response.gatewayTransactionId,
+                }
+            )
+            client.post(
+                "http://localhost:8003/api/merchant/sync",
+                json={
+                    "passport_id": req.passport_id,
+                    "status": "PENDING",
+                    "payment_reference": req.payment_reference,
+                    "update_reason": "Deliberate downstream delay (Gateway SUCCESS vs Merchant PENDING)",
+                }
+            )
+    except Exception:
+        pass
+
     return {
         "is_replay": False,
         "gateway_response": gw_response,
@@ -500,6 +560,35 @@ def reconcile_payment(req: ReconcileRequest):
     passport_updated = store.get_passport(req.passport_id)
     merchant_updated = store.get_merchant_record(req.passport_id)
     settlement = store.get_settlement(req.passport_id, req.payment_reference)
+
+    # Push state updates to Part 2 and Part 4
+    if result.all_passed:
+        try:
+            import httpx
+            with httpx.Client(timeout=0.5) as client:
+                # Update Part 2 Passport to SETTLED
+                client.post(
+                    f"http://localhost:8002/api/passport/{req.passport_id}/transition",
+                    json={
+                        "new_state": "SETTLED",
+                        "event_type": "SETTLED",
+                        "description": "Reconciliation verified all 6 checks -> Exactly-once settlement recorded",
+                        "payment_reference": req.payment_reference,
+                        "settlement_id": settlement.settlement_id if settlement else None,
+                    }
+                )
+                # Update Part 4 Merchant Dashboard in real time (PENDING -> SETTLED)
+                client.post(
+                    "http://localhost:8003/api/merchant/sync",
+                    json={
+                        "passport_id": req.passport_id,
+                        "status": "SETTLED",
+                        "payment_reference": req.payment_reference,
+                        "update_reason": "Reconciliation engine confirmed gateway payment",
+                    }
+                )
+        except Exception:
+            pass
 
     return {
         "reconciliation_result": result,

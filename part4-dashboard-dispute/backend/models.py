@@ -8,101 +8,87 @@ from datetime import datetime
 from enum import Enum
 
 
-# ---------------------------------------------------------------------------
-# Enumerations
-# ---------------------------------------------------------------------------
+class MerchantSyncStatus(str, Enum):
+    PENDING = "PENDING"      # Deliberate stale state during demo!
+    VERIFIED = "VERIFIED"    # Reconciliation confirmed
+    SETTLED = "SETTLED"      # Corrected real-time state
+
 
 class DisputeStatus(str, Enum):
-    OPEN        = "OPEN"         # Dispute filed, under review
-    INVESTIGATING = "INVESTIGATING"  # Evidence being examined
-    RESOLVED    = "RESOLVED"     # Resolved — decision made
-    CLOSED      = "CLOSED"       # Closed without action (invalid dispute)
+    SETTLED = "SETTLED"           # Clean initial state
+    DISPUTED = "DISPUTED"         # Dispute opened by participant
+    UNDER_REVIEW = "UNDER_REVIEW" # Evidence timeline being reviewed
+    RESOLVED = "RESOLVED"         # Dispute settled using immutable evidence
 
 
-class DisputeResolution(str, Enum):
-    UPHELD      = "UPHELD"       # Dispute upheld — refund/action taken
-    DISMISSED   = "DISMISSED"    # Dispute dismissed — original transaction stands
-    PARTIAL     = "PARTIAL"      # Partial resolution
+class MerchantTransaction(BaseModel):
+    passport_id: str
+    payer: str
+    receiver: str
+    amount: float
+    currency: str = "INR"
+    purpose: str
+    status: MerchantSyncStatus = MerchantSyncStatus.PENDING
+    payment_reference: Optional[str] = None
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    settled_at: Optional[str] = None
+    is_stale_demo_mismatch: bool = True  # True when artificially held at PENDING
 
 
-class DisputeReason(str, Enum):
-    AMOUNT_MISMATCH   = "AMOUNT_MISMATCH"
-    UNAUTHORIZED      = "UNAUTHORIZED"
-    DOUBLE_CHARGE     = "DOUBLE_CHARGE"
-    NOT_RECEIVED      = "NOT_RECEIVED"
-    WRONG_RECEIVER    = "WRONG_RECEIVER"
-    OTHER             = "OTHER"
-
-
-# ---------------------------------------------------------------------------
-# Core Domain Models
-# ---------------------------------------------------------------------------
-
-class EvidenceMessage(BaseModel):
-    """A single chat message used as evidence in a dispute."""
-    sender: str
-    text: str
+class DisputeEvidenceItem(BaseModel):
+    stage: str
+    title: str
+    human_readable_verdict: str
+    technical_details: Dict[str, Any] = Field(default_factory=dict)
     timestamp: str
+    verified: bool = True
+
+
+class DisputeEvidencePackage(BaseModel):
+    passport_id: str
+    original_agreement: str
+    mutual_confirmation: str
+    payment_attempt: str
+    gateway_evidence: str
+    merchant_evidence: str
+    reconciliation_verdict: str
+    final_state: str
+    evidence_hash: str
+    is_tamper_evident: bool = True
+    items: List[DisputeEvidenceItem] = Field(default_factory=list)
 
 
 class DisputeRecord(BaseModel):
-    """A dispute filed against a specific settled transaction."""
-    dispute_id: str                             # DISP-XXXXXXXX
+    dispute_id: str
     passport_id: str
-    settlement_id: Optional[str] = None
-    payment_reference: Optional[str] = None
-    filed_by: str                               # Who filed the dispute (payer or receiver)
-    reason: DisputeReason
-    description: str
-    claimed_amount: Optional[float] = None
-    status: DisputeStatus = DisputeStatus.OPEN
-    resolution: Optional[DisputeResolution] = None
-    resolution_notes: Optional[str] = None
-    conversation_evidence: List[EvidenceMessage] = Field(default_factory=list)
-    reconciliation_checks: List[Dict[str, Any]] = Field(default_factory=list)
-    filed_at: str = Field(default_factory=lambda: datetime.now().isoformat())
-    updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    initiator: str  # e.g., 'Riya' claiming 'I never received that ₹250'
+    respondent: str # e.g., 'Arjun' saying 'I already paid you'
+    claim_text: str
+    defense_text: str
+    status: DisputeStatus = DisputeStatus.DISPUTED
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
     resolved_at: Optional[str] = None
+    resolution_notes: Optional[str] = None
+    evidence_package: Optional[DisputeEvidencePackage] = None
 
-
-class MerchantSummary(BaseModel):
-    """Aggregated analytics for the merchant dashboard."""
-    total_passports: int = 0
-    total_settled: int = 0
-    total_pending: int = 0
-    total_disputed: int = 0
-    total_volume_inr: float = 0.0
-    settled_volume_inr: float = 0.0
-    open_disputes: int = 0
-    resolved_disputes: int = 0
-    avg_settlement_time_sec: Optional[float] = None
-    top_payers: List[Dict[str, Any]] = Field(default_factory=list)
-    top_receivers: List[Dict[str, Any]] = Field(default_factory=list)
-    purpose_breakdown: Dict[str, int] = Field(default_factory=dict)
-    daily_volume: List[Dict[str, Any]] = Field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# API Request / Response Models
-# ---------------------------------------------------------------------------
 
 class FileDisputeRequest(BaseModel):
     passport_id: str
-    filed_by: str
-    reason: DisputeReason
-    description: str
-    claimed_amount: Optional[float] = None
+    initiator: str = "Riya"
+    claim_text: str = "I never received that ₹250 for tea yesterday"
+    defense_text: str = "I already paid you via UPI, check the transaction"
 
 
-class UpdateDisputeRequest(BaseModel):
-    dispute_id: str
-    status: DisputeStatus
-    resolution: Optional[DisputeResolution] = None
-    resolution_notes: Optional[str] = None
+class ResolveDisputeRequest(BaseModel):
+    resolution_action: str = "RESOLVE_IN_FAVOR_OF_SETTLEMENT"
+    resolution_notes: str = (
+        "Reconciliation evidence verified against authoritative Mock UPI Gateway. "
+        "Payment was executed successfully. Merchant state corrected. Dispute closed."
+    )
 
 
-class SeedDisputeRequest(BaseModel):
+class SyncMerchantRequest(BaseModel):
     passport_id: str
-    filed_by: str = "Arjun"
-    reason: DisputeReason = DisputeReason.AMOUNT_MISMATCH
-    description: str = "I was charged ₹250 but the agreed amount was ₹200"
+    status: MerchantSyncStatus
+    payment_reference: Optional[str] = None
+    update_reason: Optional[str] = None

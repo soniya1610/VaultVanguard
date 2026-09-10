@@ -191,6 +191,44 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', background: '#020617', color: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
 
+      {/* ── Monorepo Ecosystem Quick Nav ── */}
+      <div
+        style={{
+          background: '#090d16',
+          borderBottom: '1px solid #1f2937',
+          padding: '6px 24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '11px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ color: '#6b7280', fontWeight: 600 }}>TrustBridge Monorepo:</span>
+          <a href="http://localhost:5173" target="_blank" rel="noreferrer" style={{ color: '#9ca3af', textDecoration: 'none', padding: '2px 8px', borderRadius: '4px' }}>
+            Part 1: Chat & Consent (:5173) ↗
+          </a>
+          <a href="http://localhost:5175" target="_blank" rel="noreferrer" style={{ color: '#9ca3af', textDecoration: 'none', padding: '2px 8px', borderRadius: '4px' }}>
+            Part 2: Passport & State (:5175) ↗
+          </a>
+          <span
+            style={{
+              background: 'rgba(251, 146, 60, 0.2)',
+              color: '#fb923c',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontWeight: 700,
+              border: '1px solid rgba(251, 146, 60, 0.4)',
+            }}
+          >
+            Part 3: Payment & Reconcile (:5174) [Active]
+          </span>
+          <a href="http://localhost:5176" target="_blank" rel="noreferrer" style={{ color: '#9ca3af', textDecoration: 'none', padding: '2px 8px', borderRadius: '4px' }}>
+            Part 4: Merchant & Dispute (:5176) ↗
+          </a>
+        </div>
+      </div>
+
       {/* ── Header ── */}
       <header
         style={{

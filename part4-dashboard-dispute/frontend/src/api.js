@@ -1,96 +1,83 @@
-const API_BASE = '/api';
+const BASE_URL = 'http://localhost:8003/api';
 
-// ── Health ────────────────────────────────────────────────────────
 export async function fetchHealth() {
-  const res = await fetch(`${API_BASE}/health`);
-  if (!res.ok) throw new Error('Backend offline');
+  const res = await fetch(`${BASE_URL}/health`);
+  if (!res.ok) throw new Error('Part 4 Health check failed');
   return res.json();
 }
 
-// ── Dashboard ─────────────────────────────────────────────────────
-export async function fetchSummary() {
-  const res = await fetch(`${API_BASE}/dashboard/summary`);
-  if (!res.ok) throw new Error('Failed to fetch dashboard summary');
+export async function fetchMerchantDashboard() {
+  const res = await fetch(`${BASE_URL}/merchant/dashboard`);
+  if (!res.ok) throw new Error('Failed to fetch merchant dashboard');
   return res.json();
 }
 
-export async function fetchPassports() {
-  const res = await fetch(`${API_BASE}/dashboard/passports`);
-  if (!res.ok) throw new Error('Failed to fetch passports');
-  return res.json();
-}
-
-export async function fetchSettlements() {
-  const res = await fetch(`${API_BASE}/dashboard/settlements`);
-  if (!res.ok) throw new Error('Failed to fetch settlements');
-  return res.json();
-}
-
-export async function fetchAudit() {
-  const res = await fetch(`${API_BASE}/dashboard/audit`);
-  if (!res.ok) throw new Error('Failed to fetch audit log');
-  return res.json();
-}
-
-// ── Disputes ──────────────────────────────────────────────────────
-export async function fetchAllDisputes() {
-  const res = await fetch(`${API_BASE}/dispute/all`);
-  if (!res.ok) throw new Error('Failed to fetch disputes');
-  return res.json();
-}
-
-export async function fetchDispute(disputeId) {
-  const res = await fetch(`${API_BASE}/dispute/${disputeId}`);
-  if (!res.ok) throw new Error(`Failed to fetch dispute ${disputeId}`);
-  return res.json();
-}
-
-export async function fileDispute(payload) {
-  const res = await fetch(`${API_BASE}/dispute/file`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || 'Failed to file dispute');
-  }
-  return res.json();
-}
-
-export async function updateDispute(payload) {
-  const res = await fetch(`${API_BASE}/dispute/update`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || 'Failed to update dispute');
-  }
-  return res.json();
-}
-
-export async function seedDispute(passportId, filedBy = 'Arjun') {
-  const res = await fetch(`${API_BASE}/demo/seed-dispute`, {
+export async function syncMerchantStatus(passportId, status, paymentRef = null) {
+  const res = await fetch(`${BASE_URL}/merchant/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       passport_id: passportId,
-      filed_by: filedBy,
-      reason: 'AMOUNT_MISMATCH',
-      description: 'I was charged ₹250 but the agreed amount was ₹200 — please review the conversation evidence.',
+      status: status,
+      payment_reference: paymentRef,
+      update_reason: 'Dashboard manual / webhook synchronization',
     }),
   });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || 'Failed to seed dispute');
-  }
+  if (!res.ok) throw new Error('Failed to sync merchant record');
+  return res.json();
+}
+
+export async function fileDispute(passportId, initiator, claimText, defenseText) {
+  const res = await fetch(`${BASE_URL}/dispute/file`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      passport_id: passportId,
+      initiator: initiator,
+      claim_text: claimText,
+      defense_text: defenseText,
+    }),
+  });
+  if (!res.ok) throw new Error('Failed to file dispute');
+  return res.json();
+}
+
+export async function reviewDispute(disputeId) {
+  const res = await fetch(`${BASE_URL}/dispute/${disputeId}/review`, { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to review dispute');
+  return res.json();
+}
+
+export async function resolveDispute(disputeId, notes) {
+  const res = await fetch(`${BASE_URL}/dispute/${disputeId}/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resolution_action: 'RESOLVE', resolution_notes: notes }),
+  });
+  if (!res.ok) throw new Error('Failed to resolve dispute');
+  return res.json();
+}
+
+export async function fetchEvidence(passportId) {
+  const res = await fetch(`${BASE_URL}/dispute/${passportId}/evidence`);
+  if (!res.ok) throw new Error(`Failed to fetch evidence for ${passportId}`);
+  return res.json();
+}
+
+export async function fetchDisputes() {
+  const res = await fetch(`${BASE_URL}/disputes`);
+  if (!res.ok) throw new Error('Failed to list disputes');
+  return res.json();
+}
+
+export async function seedDemo() {
+  const res = await fetch(`${BASE_URL}/demo/seed`, { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to seed demo');
   return res.json();
 }
 
 export async function resetDemo() {
-  const res = await fetch(`${API_BASE}/demo/reset`, { method: 'POST' });
-  if (!res.ok) throw new Error('Failed to reset');
+  const res = await fetch(`${BASE_URL}/demo/reset`, { method: 'POST' });
+  if (!res.ok) throw new Error('Failed to reset demo');
   return res.json();
 }

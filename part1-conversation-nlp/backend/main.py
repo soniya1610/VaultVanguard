@@ -190,8 +190,43 @@ def handle_consent_action(req: ConsentActionRequest):
                 created_at=datetime.now().isoformat(),
             )
 
-            passport_res = create_mock_passport(passport_payload)
-            tx.passport_id = passport_res.passport_id
+            # Call Part 2 Transaction Passport Microservice
+            passport_created = False
+            try:
+                import httpx
+                with httpx.Client(timeout=1.0) as http_client:
+                    p2_res = http_client.post(
+                        "http://localhost:8002/api/passport/create",
+                        json=passport_payload.model_dump(),
+                    )
+                    if p2_res.status_code == 200:
+                        data = p2_res.json()
+                        tx.passport_id = data["passport_id"]
+                        passport_created = True
+                        
+                        # Auto-import into Part 3 Payment Orchestration if available
+                        try:
+                            http_client.post(
+                                "http://localhost:8001/api/passport/import",
+                                json={
+                                    "passport_id": tx.passport_id,
+                                    "conversation_id": passport_payload.conversation_id,
+                                    "payer": tx.payer,
+                                    "receiver": tx.receiver,
+                                    "amount": tx.amount,
+                                    "currency": tx.currency,
+                                    "purpose": tx.purpose,
+                                    "original_evidence": passport_payload.model_dump(),
+                                }
+                            )
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            if not passport_created:
+                passport_res = create_mock_passport(passport_payload)
+                tx.passport_id = passport_res.passport_id
 
     elif req.action == "dismiss":
         tx.status = "DISMISSED"

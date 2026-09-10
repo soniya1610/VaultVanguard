@@ -145,18 +145,62 @@ export default function DetectionCard({ transaction, activeUser, onConsentAction
       </div>
 
       {status === 'MUTUAL_CONSENT_REACHED' && (
-        <div className="mt-3.5 p-3 rounded-lg bg-emerald-900/50 border border-emerald-500/40 text-xs flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-400" />
-            <span>
-              Both parties confirmed ✅ <span className="text-slate-300">Handoff to Passport Layer (Part 2) Complete</span>
-            </span>
+        <div className="mt-3.5 space-y-2.5">
+          <div className="p-3 rounded-lg bg-emerald-900/50 border border-emerald-500/40 text-xs flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>
+                Both parties confirmed ✅ <span className="text-slate-300">Transaction Passport Minted</span>
+              </span>
+            </div>
+            {passport_id && (
+              <span className="font-mono bg-emerald-950 px-2.5 py-1 rounded text-emerald-300 border border-emerald-500/40 font-semibold tracking-wide">
+                {passport_id}
+              </span>
+            )}
           </div>
-          {passport_id && (
-            <span className="font-mono bg-emerald-950 px-2.5 py-1 rounded text-emerald-300 border border-emerald-500/40 font-semibold tracking-wide">
-              {passport_id}
-            </span>
-          )}
+
+          {/* Pay Now Button (Presented to Arjun per content.md) */}
+          <div className="p-3 rounded-lg bg-indigo-950/50 border border-indigo-500/30 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+            <div>
+              <div className="text-xs font-semibold text-indigo-200 flex items-center gap-1.5">
+                <span>Payment Request Generated (UPI)</span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Click Pay Now to connect to Payment Layer (Part 3) and execute UPI transfer.
+              </p>
+            </div>
+
+            <a
+              href="http://localhost:5174"
+              target="_blank"
+              rel="noreferrer"
+              className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-indigo-500 to-emerald-500 hover:from-indigo-600 hover:to-emerald-600 text-white font-bold text-xs rounded-lg shadow-lg shadow-indigo-500/20 flex items-center justify-center space-x-1.5 cursor-pointer active:scale-[0.98] transition-all no-underline"
+            >
+              <span>⚡ Pay Now {currency === 'INR' ? '₹' : currency}{amount}</span>
+            </a>
+          </div>
+
+          {/* Cross-Service Deep Links */}
+          <div className="flex items-center justify-end space-x-3 text-[11px] pt-1">
+            <a
+              href="http://localhost:5175"
+              target="_blank"
+              rel="noreferrer"
+              className="text-indigo-400 hover:text-indigo-300 underline"
+            >
+              Inspect Passport Timeline (Part 2) ↗
+            </a>
+            <span className="text-slate-600">·</span>
+            <a
+              href="http://localhost:5176"
+              target="_blank"
+              rel="noreferrer"
+              className="text-rose-400 hover:text-rose-300 underline"
+            >
+              Dispute / View Evidence (Part 4) ↗
+            </a>
+          </div>
         </div>
       )}
 

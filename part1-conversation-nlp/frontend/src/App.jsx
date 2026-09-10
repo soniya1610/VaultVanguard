@@ -84,6 +84,29 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+      {/* Monorepo Quick Switcher */}
+      <div className="bg-slate-900/90 border-b border-slate-800 px-4 py-1.5 flex items-center justify-between text-[11px]">
+        <div className="flex items-center space-x-2">
+          <span className="text-slate-500 font-semibold">TrustBridge Monorepo:</span>
+          <span className="bg-indigo-500/20 text-indigo-300 font-bold px-2 py-0.5 rounded border border-indigo-500/40">
+            Part 1: Chat & Consent (:5173) [Active]
+          </span>
+          <a href="http://localhost:5175" target="_blank" rel="noreferrer" className="text-slate-400 hover:text-slate-200 px-2 py-0.5 rounded">
+            Part 2: Passport & State (:5175) ↗
+          </a>
+          <a href="http://localhost:5174" target="_blank" rel="noreferrer" className="text-slate-400 hover:text-slate-200 px-2 py-0.5 rounded">
+            Part 3: Payment & Reconcile (:5174) ↗
+          </a>
+          <a href="http://localhost:5176" target="_blank" rel="noreferrer" className="text-slate-400 hover:text-slate-200 px-2 py-0.5 rounded">
+            Part 4: Merchant & Dispute (:5176) ↗
+          </a>
+        </div>
+        <div className="flex items-center space-x-1.5">
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
+          <span className="text-emerald-400 font-semibold">Port :8000</span>
+        </div>
+      </div>
+
       <UserSwitcher
         activeUser={activeUser}
         setActiveUser={setActiveUser}

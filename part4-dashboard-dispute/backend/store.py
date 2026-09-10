@@ -1,77 +1,131 @@
 """
-Part 4 — In-Memory Store (DashboardStore)
-Holds dispute records. All other data is fetched live from Part 3.
+Part 4 — In-Memory Store for Merchant Ledger & Disputes
 """
+import threading
 import uuid
-import logging
-from typing import Dict, List, Optional
 from datetime import datetime
-from models import DisputeRecord, DisputeStatus, DisputeResolution
+from typing import Dict, List, Optional
 
-logger = logging.getLogger("TrustBridge-P4-Store")
+from models import (
+    MerchantTransaction,
+    MerchantSyncStatus,
+    DisputeRecord,
+    DisputeStatus,
+    FileDisputeRequest,
+    ResolveDisputeRequest,
+)
+from evidence_service import build_evidence_package
 
 
-class DashboardStore:
+class DisputeStore:
     def __init__(self):
-        # Disputes keyed by dispute_id
+        self._lock = threading.Lock()
+        self.transactions: Dict[str, MerchantTransaction] = {}
         self.disputes: Dict[str, DisputeRecord] = {}
-        # Index: passport_id → list of dispute_ids
-        self._passport_index: Dict[str, List[str]] = {}
 
-    def reset(self):
-        self.disputes.clear()
-        self._passport_index.clear()
-        logger.info("DashboardStore reset to initial state")
+    def add_transaction(self, tx: MerchantTransaction):
+        with self._lock:
+            self.transactions[tx.passport_id] = tx
 
-    # ------------------------------------------------------------------
-    # Dispute operations
-    # ------------------------------------------------------------------
-    def add_dispute(self, dispute: DisputeRecord) -> DisputeRecord:
-        self.disputes[dispute.dispute_id] = dispute
-        self._passport_index.setdefault(dispute.passport_id, []).append(dispute.dispute_id)
-        logger.info(f"Dispute filed: {dispute.dispute_id} for passport {dispute.passport_id}")
-        return dispute
+    def get_transaction(self, passport_id: str) -> Optional[MerchantTransaction]:
+        with self._lock:
+            return self.transactions.get(passport_id)
 
-    def get_dispute(self, dispute_id: str) -> Optional[DisputeRecord]:
-        return self.disputes.get(dispute_id)
+    def list_transactions(self) -> List[MerchantTransaction]:
+        with self._lock:
+            return list(self.transactions.values())
 
-    def get_disputes_for_passport(self, passport_id: str) -> List[DisputeRecord]:
-        ids = self._passport_index.get(passport_id, [])
-        return [self.disputes[d] for d in ids if d in self.disputes]
+    def update_merchant_status(
+        self,
+        passport_id: str,
+        status: MerchantSyncStatus,
+        payment_ref: Optional[str] = None,
+    ) -> Optional[MerchantTransaction]:
+        with self._lock:
+            tx = self.transactions.get(passport_id)
+            if not tx:
+                # If transaction doesn't exist yet, create it
+                tx = MerchantTransaction(
+                    passport_id=passport_id,
+                    payer="Arjun",
+                    receiver="Riya",
+                    amount=250.0,
+                    purpose="tea",
+                    status=status,
+                    payment_reference=payment_ref,
+                    is_stale_demo_mismatch=status == MerchantSyncStatus.PENDING,
+                )
+                self.transactions[passport_id] = tx
+            else:
+                tx.status = status
+                if payment_ref:
+                    tx.payment_reference = payment_ref
+                if status == MerchantSyncStatus.SETTLED:
+                    tx.settled_at = datetime.now().isoformat()
+                    tx.is_stale_demo_mismatch = False
+            return tx
 
-    def get_all_disputes(self) -> List[DisputeRecord]:
-        return list(self.disputes.values())
+    def file_dispute(self, req: FileDisputeRequest, passport_data=None, payment_data=None) -> DisputeRecord:
+        with self._lock:
+            dispute_id = f"disp-{uuid.uuid4().hex[:8]}"
+            tx = self.transactions.get(req.passport_id)
 
-    def update_dispute(
+            evidence_pkg = build_evidence_package(
+                passport_id=req.passport_id,
+                passport_data=passport_data or (tx.model_dump() if tx else None),
+                payment_data=payment_data,
+            )
+
+            record = DisputeRecord(
+                dispute_id=dispute_id,
+                passport_id=req.passport_id,
+                initiator=req.initiator,
+                respondent="Arjun" if req.initiator == "Riya" else "Riya",
+                claim_text=req.claim_text,
+                defense_text=req.defense_text,
+                status=DisputeStatus.DISPUTED,
+                created_at=datetime.now().isoformat(),
+                evidence_package=evidence_pkg,
+            )
+            self.disputes[dispute_id] = record
+            return record
+
+    def update_dispute_status(
         self,
         dispute_id: str,
         status: DisputeStatus,
-        resolution: Optional[DisputeResolution] = None,
-        resolution_notes: Optional[str] = None,
-    ) -> Optional[DisputeRecord]:
-        d = self.disputes.get(dispute_id)
-        if not d:
+        notes: Optional[str] = None,
+    ) -> DisputeRecord:
+        with self._lock:
+            record = self.disputes.get(dispute_id)
+            if not record:
+                raise KeyError(f"Dispute {dispute_id} not found")
+
+            record.status = status
+            if status == DisputeStatus.RESOLVED:
+                record.resolved_at = datetime.now().isoformat()
+                record.resolution_notes = notes or "Dispute resolved with cryptographic evidence verification."
+            return record
+
+    def get_dispute(self, dispute_id: str) -> Optional[DisputeRecord]:
+        with self._lock:
+            return self.disputes.get(dispute_id)
+
+    def get_dispute_by_passport(self, passport_id: str) -> Optional[DisputeRecord]:
+        with self._lock:
+            for d in self.disputes.values():
+                if d.passport_id == passport_id:
+                    return d
             return None
-        d.status = status
-        d.updated_at = datetime.now().isoformat()
-        if resolution:
-            d.resolution = resolution
-        if resolution_notes:
-            d.resolution_notes = resolution_notes
-        if status in (DisputeStatus.RESOLVED, DisputeStatus.CLOSED):
-            d.resolved_at = datetime.now().isoformat()
-        logger.info(f"Dispute {dispute_id} updated → {status.value}")
-        return d
 
-    def open_dispute_count(self) -> int:
-        return sum(1 for d in self.disputes.values() if d.status == DisputeStatus.OPEN)
+    def list_disputes(self) -> List[DisputeRecord]:
+        with self._lock:
+            return list(self.disputes.values())
 
-    def dispute_count_by_status(self) -> Dict[str, int]:
-        counts: Dict[str, int] = {}
-        for d in self.disputes.values():
-            counts[d.status.value] = counts.get(d.status.value, 0) + 1
-        return counts
+    def reset(self):
+        with self._lock:
+            self.transactions.clear()
+            self.disputes.clear()
 
 
-# Global singleton
-store = DashboardStore()
+store = DisputeStore()

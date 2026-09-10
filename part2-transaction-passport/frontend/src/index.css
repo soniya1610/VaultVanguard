@@ -19,15 +19,26 @@ code, pre, .font-mono {
   font-family: 'JetBrains Mono', monospace;
 }
 
-@keyframes pulseWarning {
-  0%, 100% { border-color: rgba(249, 115, 22, 0.4); box-shadow: 0 0 10px rgba(249, 115, 22, 0.15); }
-  50% { border-color: rgba(249, 115, 22, 0.9); box-shadow: 0 0 20px rgba(249, 115, 22, 0.35); }
+/* Animations */
+@keyframes pulseSubtle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.98); }
 }
 
-.animate-mismatch {
-  animation: pulseWarning 2s infinite ease-in-out;
+.animate-pulse-subtle {
+  animation: pulseSubtle 2.5s infinite ease-in-out;
 }
 
+@keyframes glowPulse {
+  0%, 100% { box-shadow: 0 0 15px rgba(99, 102, 241, 0.2); }
+  50% { box-shadow: 0 0 25px rgba(99, 102, 241, 0.4); }
+}
+
+.glow-indigo {
+  animation: glowPulse 3s infinite ease-in-out;
+}
+
+/* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -38,4 +49,7 @@ code, pre, .font-mono {
 ::-webkit-scrollbar-thumb {
   background: rgba(51, 65, 85, 0.8);
   border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 1);
 }

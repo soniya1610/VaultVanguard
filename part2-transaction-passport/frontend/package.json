@@ -1,7 +1,7 @@
 {
-  "name": "part4-dashboard-dispute-frontend",
+  "name": "part2-transaction-passport-frontend",
   "private": true,
-  "version": "4.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

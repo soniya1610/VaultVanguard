@@ -1,147 +1,62 @@
 # Part 4 — Merchant Dashboard & Dispute Resolution
 
-Part 4 is the final layer of **TrustBridge**. It provides a full merchant analytics dashboard, real-time transaction monitoring, and a complete dispute resolution workflow backed by the immutable conversation evidence from Part 1.
+The **Merchant Dashboard & Dispute Resolution** layer visualizes the creditor/merchant ledger, highlights the intentional downstream synchronization failure, receives live reconciliation updates, and resolves post-settlement "he said / she said" disputes using immutable evidence.
 
 ---
 
-## Folder Structure
+## Key Responsibilities
 
-```
-part4-dashboard-dispute/
-├── README.md
-├── backend/
-│   ├── main.py              # FastAPI server — port 8002
-│   ├── config.py            # Settings (P4_HOST, P4_PORT, PART3_BASE_URL)
-│   ├── models.py            # Pydantic v2 schemas (DisputeRecord, MerchantSummary, ...)
-│   ├── store.py             # In-memory DashboardStore (disputes)
-│   └── requirements.txt     # Python dependencies (adds httpx for Part 3 calls)
-└── frontend/
-    ├── package.json
-    ├── vite.config.js       # Dev server port 5174, proxy /api → localhost:8002
-    ├── index.html
-    └── src/
-        ├── main.jsx
-        ├── App.jsx                    # 5-tab dashboard orchestrator
-        ├── api.js                     # API client for all Part 4 + proxied Part 3 data
-        ├── index.css                  # Dark glassmorphism design system
-        └── components/
-            ├── StatsOverview.jsx      # 6 animated metric cards
-            ├── TransactionTable.jsx   # Full transaction list with state badges + dispute CTA
-            ├── DisputePanel.jsx       # Filterable dispute list with inline resolution UI
-            ├── FileDisputeModal.jsx   # Rich dispute filing modal with evidence notice
-            ├── AuditViewer.jsx        # Scrollable system-wide audit timeline
-            └── AnalyticsPanel.jsx     # Charts: daily volume, top payers/receivers, purpose breakdown
-```
+1. **Merchant / Creditor Dashboard (Riya's View)**:
+   - Renders incoming obligations, ledger balances, and payment statuses.
+   - Highlights the live-demo contradiction: **Gateway: SUCCESS** vs **Dashboard: PENDING**.
+   - Receives real-time state synchronization when Reconciliation completes (`PENDING → SETTLED`).
+2. **The "He Said / She Said" Dispute Simulator**:
+   - Reenacts later disagreements: Riya claims *"I never received that ₹250,"* while Arjun replies *"I already paid you."*
+3. **Structured Human-Readable Evidence Timeline**:
+   - Translates raw backend events and cryptographic hashes into verified human-readable findings:
+     - **Original Agreement**: Arjun agreed to repay ₹250 for tea
+     - **Mutual Confirmation**: Arjun and Riya both confirmed
+     - **Payment Attempt**: ₹250 initiated via UPI
+     - **Gateway Evidence**: Authoritative SUCCESS
+     - **Merchant Evidence**: Initially PENDING (Lag)
+     - **Reconciliation Verdict**: Gateway status independently verified (6/6 checks passed)
+     - **Final State**: SETTLED (Idempotent exactly-once)
+4. **Dispute State Lifecycle**:
+   - Manages: `SETTLED → DISPUTED → UNDER_REVIEW → RESOLVED`.
+   - Preserves original settlement evidence without overwriting historical records.
 
 ---
 
-## Technologies
+## API Endpoints (`:8003`)
 
-- **Backend**: Python 3.13+, FastAPI, Uvicorn, Pydantic v2, `httpx` (calls Part 3)
-- **Frontend**: React 18, Vite 5, Lucide Icons, Vanilla CSS (glassmorphism dark theme)
-- **Port**: Backend `8002`, Frontend dev `5174`
-
----
-
-## How It Integrates
-
-Part 4 **reads data from Part 3** (via `httpx` server-side and Vite proxy client-side). It does **not** duplicate Part 3's data — it aggregates it live:
-
-```
-Part 1 (8000) ──→ Part 3 (8001) ──→ Part 4 (8002)  [reads live]
-                                  └──→ Dispute Store  [owns disputes]
-```
-
-When a dispute is filed, Part 4 automatically pulls:
-- **Conversation evidence** from `original_evidence` stored in Part 3's passport record
-- **Reconciliation check results** from Part 3's settlement record
-- **Payment reference** and **settlement ID** for full cross-reference
+- `GET  /api/health` — Health check & peer URLs.
+- `GET  /api/merchant/dashboard` — Riya's dashboard metrics and transactions.
+- `POST /api/merchant/sync` — Webhook endpoint for live reconciliation updates.
+- `POST /api/dispute/file` — File dispute with claim & defense.
+- `POST /api/dispute/{id}/review` — Move dispute to `UNDER_REVIEW`.
+- `POST /api/dispute/{id}/resolve` — Resolve dispute using verified evidence.
+- `GET  /api/dispute/{passport_id}/evidence` — Retrieve structured evidence timeline package.
+- `GET  /api/disputes` — List all active and resolved disputes.
+- `POST /api/demo/seed` — Seed demo state with deliberate PENDING lag.
+- `POST /api/demo/reset` — Clear store.
 
 ---
 
-## Setup & Installation
+## Quickstart
 
-### Backend
-
+### Backend (Port 8003)
 ```bash
-cd backend
-pip install -r requirements.txt
-python -m uvicorn main:app --host 0.0.0.0 --port 8002 --reload
+cd part4-dashboard-dispute/backend
+python -m uvicorn main:app --host 0.0.0.0 --port 8003 --reload
 ```
 
-- API: `http://localhost:8002`
-- Swagger: `http://localhost:8002/docs`
-
-> **Requires Part 3 running on port 8001** for dashboard data. Part 4's dispute filing still works standalone but evidence won't be populated.
-
-### Frontend
-
+### Frontend (Port 5176)
 ```bash
-cd frontend
-npm install
+cd part4-dashboard-dispute/frontend
 npm run dev
 ```
 
-- Dev Server: `http://localhost:5174`
-
----
-
-## API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/health` | Health check — includes Part 3 status |
-| `GET` | `/api/dashboard/summary` | Aggregated merchant analytics |
-| `GET` | `/api/dashboard/passports` | All passports enriched with dispute info |
-| `GET` | `/api/dashboard/settlements` | All settlements (proxied from Part 3) |
-| `GET` | `/api/dashboard/audit` | Full system audit log (proxied from Part 3) |
-| `POST` | `/api/dispute/file` | File a new dispute (auto-attaches evidence) |
-| `GET` | `/api/dispute/all` | List all disputes |
-| `GET` | `/api/dispute/{id}` | Single dispute with full evidence |
-| `POST` | `/api/dispute/update` | Update dispute status / resolution |
-| `GET` | `/api/dispute/passport/{id}` | All disputes for a passport |
-| `POST` | `/api/demo/seed-dispute` | Seed a demo dispute |
-| `POST` | `/api/demo/reset` | Reset dispute store |
-
----
-
-## Dashboard Features
-
-### Overview Tab
-- 6 KPI stat cards (volume, settled, pending, open disputes, total disputes, system health)
-- Recent transactions table
-- Recent disputes list
-
-### Transactions Tab
-- Full transaction table with passport state badges
-- `File Dispute` button visible only on `SETTLED` passports
-
-### Disputes Tab
-- Filter by: All / Open / Investigating / Resolved / Closed
-- Expandable dispute rows showing:
-  - Description, reason, filed-by, timestamps
-  - Conversation evidence messages (from Part 1 via Part 3)
-  - Reconciliation check results (pass/fail)
-- Inline actions: Begin Investigation → Resolve (UPHELD / DISMISSED / PARTIAL) / Close
-
-### Analytics Tab
-- Daily transaction volume bar chart (last 14 days)
-- Top payers leaderboard (gradient bars)
-- Top receivers leaderboard
-- Transaction purpose breakdown
-
-### Audit Trail Tab
-- Full system-wide audit log from Part 3
-- Color-coded by event type
-- Timeline view with key data pills
-
----
-
-## Dispute Lifecycle
-
-```
-Filed (OPEN) → Begin Investigation (INVESTIGATING) → Resolve (RESOLVED)
-                                                   → Close   (CLOSED)
-
-Resolution types: UPHELD | DISMISSED | PARTIAL
+### Unit Tests
+```bash
+pytest part4-dashboard-dispute/backend/tests
 ```
