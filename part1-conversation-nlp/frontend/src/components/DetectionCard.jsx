@@ -184,19 +184,25 @@ export default function DetectionCard({ transaction, activeUser, onConsentAction
           {/* Cross-Service Deep Links */}
           <div className="flex items-center justify-end space-x-3 text-[11px] pt-1">
             <a
-              href="http://localhost:5175"
-              target="_blank"
-              rel="noreferrer"
-              className="text-indigo-400 hover:text-indigo-300 underline"
+              href="#/part2"
+              onClick={(e) => {
+                if (window.location.hash !== undefined) {
+                  window.location.hash = '#/part2';
+                }
+              }}
+              className="text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
             >
               Inspect Passport Timeline (Part 2) ↗
             </a>
             <span className="text-slate-600">·</span>
             <a
-              href="http://localhost:5176"
-              target="_blank"
-              rel="noreferrer"
-              className="text-rose-400 hover:text-rose-300 underline"
+              href="#/part4"
+              onClick={(e) => {
+                if (window.location.hash !== undefined) {
+                  window.location.hash = '#/part4';
+                }
+              }}
+              className="text-rose-400 hover:text-rose-300 underline cursor-pointer"
             >
               Dispute / View Evidence (Part 4) ↗
             </a>
