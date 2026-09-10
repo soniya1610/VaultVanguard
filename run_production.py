@@ -24,6 +24,12 @@ import os
 import time
 import signal
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
 
 SERVICES = [
